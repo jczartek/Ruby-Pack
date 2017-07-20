@@ -1,0 +1,9 @@
+[Plugin]
+Module=ruby-pack-plugin
+Name=Ruby Auto-Indenter
+Description=Provides auto-indentation for the Ruby programming language
+Authors=Jakub Czartek <kuba@linux.pl>
+Copyright=Copyright © 2017 Jakub Czartek
+Builtin=true
+X-Indenter-Languages=ruby
+X-Indenter-Languages-Priority=0
