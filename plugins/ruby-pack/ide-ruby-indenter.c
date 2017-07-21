@@ -44,26 +44,53 @@ enum
   SPECIAL
 };
 
-struct keywords
+struct Keywords
 {
   gchar *keyword;
-  guint type;
-} keywords_opening_scope[] = {
-    {"begin", NORMAL},
-    {"class", NORMAL},
-    {"def", NORMAL},
-    {"else", SPECIAL},
-    {"elsif", SPECIAL},
-    {"ensure", SPECIAL},
-    {"for", NORMAL},
-    {"if", NORMAL},
-    {"module", NORMAL},
-    {"rescue", SPECIAL},
-    {"unless", NORMAL},
-    {"untill", NORMAL},
-    {"when", NORMAL},
-    {"while", NORMAL}
+  gboolean pre_scope;
+  gboolean matches_end;
+} keywords[] = {
+    {"begin", TRUE, TRUE},
+    {"class", TRUE, TRUE},
+    {"def", TRUE, TRUE},
+    {"else", TRUE, FALSE},
+    {"elsif", TRUE, FALSE},
+    {"ensure", TRUE, FALSE},
+    {"for", TRUE, FALSE},
+    {"if", TRUE, TRUE},
+    {"module", TRUE, TRUE},
+    {"rescue", TRUE, FALSE},
+    {"unless", TRUE, TRUE},
+    {"until", TRUE, TRUE},
+    {"when", TRUE, FALSE},
+    {"while", TRUE, TRUE},
+    {"case", FALSE, TRUE}
 };
+
+static gchar *
+get_line_indentation (const GtkTextIter *iter)
+{
+  GtkTextIter start;
+  GtkTextIter end;
+
+  start = *iter;
+  end = *iter;
+
+  gtk_text_iter_set_line_offset (&start, 0);
+  gtk_text_iter_set_line_offset (&end, 0);
+
+  while (!gtk_text_iter_ends_line (&end))
+    {
+      gunichar ch = gtk_text_iter_get_char (&end);
+
+      if (!g_unichar_isspace (ch))
+        break;
+
+      gtk_text_iter_forward_char (&end);
+    }
+
+  return gtk_text_iter_get_slice (&start, &end);
+}
 
 static gboolean
 is_special (const GtkTextIter *iter)
@@ -101,9 +128,9 @@ lookup_keyword_opening_scope (const GtkTextIter *line)
   if(key[0] == NULL)
     goto failure;
 
-  for (gint i = 0; i < G_N_ELEMENTS (keywords_opening_scope); i++)
+  for (gint i = 0; i < G_N_ELEMENTS (keywords); i++)
     {
-      if (g_strcmp0 (key[0], keywords_opening_scope[i].keyword) == 0)
+      if (g_strcmp0 (key[0], keywords[i].keyword) == 0)
         return i;
     }
 
@@ -249,7 +276,7 @@ adjust_keyword_add (IdeRubyIndenter *rindenter,
               ends++;
               continue;
             }
-          if (((index = lookup_keyword_opening_scope (&copy)) != -1) && (keywords_opening_scope[index].type == NORMAL))
+          if (((index = lookup_keyword_opening_scope (&copy)) != -1) && (keywords[index].matches_end))
             {
               if (ends == 0)
                 {
@@ -273,25 +300,6 @@ failure:
   IDE_RETURN (NULL);
 }
 
-static guint
-count_current_indent(const GtkTextIter *iter)
-{
-  GtkTextIter cur = *iter;
-  gunichar chr = 0;
-  guint indent = 0;
-
-  chr = gtk_text_iter_get_char (&cur);
-
-  while (chr == ' ')
-    {
-      indent++;
-      gtk_text_iter_forward_char (&cur);
-      chr = gtk_text_iter_get_char (&cur);
-    }
-
-  return indent;
-}
-
 static gchar *
 ide_ruby_indenter_indent (IdeRubyIndenter *rindenter,
                           GtkTextView     *view,
@@ -299,20 +307,27 @@ ide_ruby_indenter_indent (IdeRubyIndenter *rindenter,
                           GtkTextIter     *iter)
 {
   GtkTextIter cur = *iter;
-  gint cur_indent = -1;
+  gchar *s = NULL;
+  gint i = -1;
 
-  gtk_text_iter_backward_visible_line (&cur);
+  gtk_text_iter_backward_char (&cur);
+  s = get_line_indentation (&cur);
 
-  cur_indent = count_current_indent (&cur);
-
-  if (lookup_keyword_opening_scope (&cur) != -1)
+  if (((i = lookup_keyword_opening_scope (&cur)) != -1) && keywords[i].pre_scope)
     {
-      cur_indent += rindenter->indent_width;
+      gchar *r = NULL;
+      gchar *t = NULL;
+
+      r = g_strnfill (rindenter->indent_width, rindenter->use_tabs ? '\t' : ' ');
+      t = g_strconcat (s, r, NULL);
+
+      g_free (s);
+      g_free (r);
+
+      return t;
     }
 
-  if (cur_indent > 0)
-    return g_strnfill (cur_indent, ' ');
-  return NULL;
+  return s;
 }
 
 static gboolean
