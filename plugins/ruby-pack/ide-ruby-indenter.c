@@ -38,12 +38,6 @@ static void indenter_iface_init (IdeIndenterInterface *iface);
 G_DEFINE_DYNAMIC_TYPE_EXTENDED (IdeRubyIndenter, ide_ruby_indenter, IDE_TYPE_OBJECT, 0,
                                 G_IMPLEMENT_INTERFACE (IDE_TYPE_INDENTER, indenter_iface_init))
 
-enum
-{
-  NORMAL,
-  SPECIAL
-};
-
 struct Keywords
 {
   gchar *keyword;
@@ -64,7 +58,8 @@ struct Keywords
     {"until", TRUE, TRUE},
     {"when", TRUE, FALSE},
     {"while", TRUE, TRUE},
-    {"case", FALSE, TRUE}
+    {"case", FALSE, TRUE},
+    {"do", TRUE, TRUE} /* it must be always last */
 };
 
 static gchar *
@@ -109,6 +104,7 @@ lookup_keyword_opening_scope (const GtkTextIter *line)
   GtkTextIter end = *line;
   gchar **key = NULL;
   gchar *s = NULL;
+  gint i, j;
 
   if (is_special (line))
     return FALSE;
@@ -128,10 +124,25 @@ lookup_keyword_opening_scope (const GtkTextIter *line)
   if(key[0] == NULL)
     goto failure;
 
-  for (gint i = 0; i < G_N_ELEMENTS (keywords); i++)
+  for (i = 0; i < G_N_ELEMENTS (keywords); i++)
     {
       if (g_strcmp0 (key[0], keywords[i].keyword) == 0)
-        return i;
+        {
+          g_free (s);
+          g_strfreev (key);
+          return i;
+        }
+    }
+
+  /* Look up the keyword 'do' */
+  for (j = 0; key[j]; j++)
+    {
+      if (g_strcmp0 (keywords[i-1].keyword, key[j]) == 0)
+        {
+          g_free (s);
+          g_strfreev (key);
+          return i-1;
+        }
     }
 
 failure:
@@ -276,6 +287,7 @@ adjust_keyword_add (IdeRubyIndenter *rindenter,
               ends++;
               continue;
             }
+
           if (((index = lookup_keyword_opening_scope (&copy)) != -1) && (keywords[index].matches_end))
             {
               if (ends == 0)
@@ -300,11 +312,26 @@ failure:
   IDE_RETURN (NULL);
 }
 
+static gboolean
+is_newline_in_braces (const GtkTextIter *iter)
+{
+  GtkTextIter prev = *iter;
+  GtkTextIter next = *iter;
+
+  gtk_text_iter_backward_char (&prev);
+  gtk_text_iter_forward_char (&next);
+
+  return ((gtk_text_iter_get_char (&prev) == '{') &&
+          (gtk_text_iter_get_char (iter) == '\n') &&
+          (gtk_text_iter_get_char (&next) == '}'));
+}
+
 static gchar *
 ide_ruby_indenter_indent (IdeRubyIndenter *rindenter,
                           GtkTextView     *view,
                           GtkTextBuffer   *buffer,
-                          GtkTextIter     *iter)
+                          GtkTextIter     *iter,
+                          gint            *cursor_offset)
 {
   GtkTextIter cur = *iter;
   gchar *s = NULL;
@@ -320,6 +347,22 @@ ide_ruby_indenter_indent (IdeRubyIndenter *rindenter,
 
       r = g_strnfill (rindenter->indent_width, rindenter->use_tabs ? '\t' : ' ');
       t = g_strconcat (s, r, NULL);
+
+      g_free (s);
+      g_free (r);
+
+      return t;
+    }
+
+  if (is_newline_in_braces (&cur))
+    {
+      gchar *r = NULL;
+      gchar *t = NULL;
+
+      r = g_strnfill (rindenter->indent_width, rindenter->use_tabs ? '\t' : ' ');
+      t = g_strconcat (s, r, "\n", s, NULL);
+
+      *cursor_offset = -(strlen (s) + 1);
 
       g_free (s);
       g_free (r);
@@ -386,7 +429,7 @@ ide_ruby_indenter_format (IdeIndenter *indenter,
     case GDK_KEY_KP_Enter:
       ret = ide_ruby_indenter_indent (rindenter, view,
                                       gtk_text_view_get_buffer (view),
-                                      begin);
+                                      begin, cursor_offset);
       return ret;
     case GDK_KEY_d:
       return adjust_keyword_add (rindenter, view, begin, end);
