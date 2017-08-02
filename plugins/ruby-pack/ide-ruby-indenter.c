@@ -58,7 +58,7 @@ struct Keywords
     {"until", TRUE, TRUE},
     {"when", TRUE, FALSE},
     {"while", TRUE, TRUE},
-    {"case", FALSE, TRUE},
+    {"case", TRUE, TRUE},
     {"do", TRUE, TRUE} /* it must be always last */
 };
 
@@ -313,17 +313,181 @@ failure:
 }
 
 static gboolean
+has_keyword (const GtkTextIter *iter,
+             const GtkTextIter *limit,
+             const gchar       *keyword)
+{
+  GtkTextIter copy = *iter;
+  gint n_line = gtk_text_iter_get_line (limit);
+
+  while (n_line > gtk_text_iter_get_line (&copy))
+    {
+      if (line_starts_with (&copy, keyword))
+        return TRUE;
+
+      if (!gtk_text_iter_forward_line (&copy))
+        return FALSE;
+    }
+  return FALSE;
+}
+
+static guint
+count_indent (const GtkTextIter *iter)
+{
+  GtkTextIter copy = *iter;
+  guint n = 0;
+  gunichar ch;
+
+  gtk_text_iter_set_line_offset (&copy, 0);
+  ch = gtk_text_iter_get_char (&copy);
+  while (g_unichar_isspace (ch) && gtk_text_iter_forward_char (&copy) && !gtk_text_iter_ends_line(&copy))
+    {
+      ch = gtk_text_iter_get_char (&copy);
+      n++;
+    }
+
+  return n;
+}
+
+static gchar *
+adjust_statement_keywords (IdeRubyIndenter *rindenter,
+                           GtkTextView     *tv,
+                           GtkTextIter     *begin,
+                           GtkTextIter     *end)
+{
+  GtkTextIter copy = *begin;
+  GtkSourceView *sv;
+  gchar *s = NULL;
+
+  gboolean matches = FALSE;
+
+  sv = GTK_SOURCE_VIEW (tv);
+
+  gtk_text_iter_backward_word_start (&copy);
+
+  s = gtk_text_iter_get_slice (&copy, begin);
+
+  matches = g_str_equal (s, "rescue") || g_str_equal (s, "ensure") || g_str_equal (s, "when") || g_str_equal (s, "elsif") || g_str_equal (s, "else");
+
+    if (matches)
+    {
+      guint line_offset;
+
+      line_offset = gtk_text_iter_get_line_offset (&copy);
+      move_first_nonspace_char (&copy);
+      if (line_offset != (guint)gtk_text_iter_get_line_offset (&copy))
+        IDE_GOTO (failure);
+    }
+
+    if (matches)
+    {
+      guint line_offset;
+
+      line_offset = gtk_source_view_get_visual_column (sv, &copy);
+
+      while (TRUE)
+        {
+          if (!move_previous_line (sv, &copy, line_offset))
+            IDE_GOTO (failure);
+
+          move_first_nonspace_char (&copy);
+
+          if (gtk_source_view_get_visual_column (sv, &copy) > line_offset)
+            continue;
+
+          if (g_str_equal (s, "rescue") || g_str_equal (s, "ensure"))
+            {
+              if (line_starts_with (&copy, "begin"))
+                {
+                  if (count_indent (&copy) == count_indent (begin))
+                    {
+                      continue;
+                    }
+                  else
+                    {
+                      move_first_nonspace_char (&copy);
+                      line_offset = gtk_source_view_get_visual_column (sv, &copy);
+                      move_to_visual_column (sv, begin, line_offset);
+                      IDE_RETURN (s);
+                    }
+                }
+            }
+          else if (g_str_equal (s, "when"))
+            {
+              if (line_starts_with (&copy, "case"))
+                {
+                  if (count_indent (&copy) == count_indent (begin))
+                    {
+                      continue;
+                    }
+                  else
+                    {
+                      move_first_nonspace_char (&copy);
+                      line_offset = gtk_source_view_get_visual_column (sv, &copy);
+                      move_to_visual_column (sv, begin, line_offset);
+                      IDE_RETURN (s);
+                    }
+                }
+            }
+          else if (g_str_equal (s, "elsif"))
+            {
+              if (line_starts_with (&copy, "if"))
+                {
+                  if (count_indent (&copy) == count_indent (begin))
+                    {
+                      continue;
+                    }
+                  else
+                    {
+                      move_first_nonspace_char (&copy);
+                      line_offset = gtk_source_view_get_visual_column (sv, &copy);
+                      move_to_visual_column (sv, begin, line_offset);
+                      IDE_RETURN (s);
+                    }
+                }
+            }
+          else if (g_str_equal (s, "else"))
+            {
+              if (line_starts_with (&copy, "if") || line_starts_with (&copy, "unless") || line_starts_with (&copy, "case"))
+                {
+                  if (count_indent (&copy) == count_indent (begin))
+                    {
+                      continue;
+                    }
+                  else
+                    {
+                      move_first_nonspace_char (&copy);
+                      line_offset = gtk_source_view_get_visual_column (sv, &copy);
+                      move_to_visual_column (sv, begin, line_offset);
+                      IDE_RETURN (s);
+                    }
+                }
+            }
+        }
+    }
+
+
+failure:
+  g_free (s);
+
+  IDE_RETURN (NULL);
+}
+
+static gboolean
 is_newline_in_braces (const GtkTextIter *iter)
 {
   GtkTextIter prev = *iter;
   GtkTextIter next = *iter;
+  gboolean square  = FALSE;
+  gboolean curly   = FALSE;
 
   gtk_text_iter_backward_char (&prev);
   gtk_text_iter_forward_char (&next);
 
-  return ((gtk_text_iter_get_char (&prev) == '{') &&
-          (gtk_text_iter_get_char (iter) == '\n') &&
-          (gtk_text_iter_get_char (&next) == '}'));
+  curly  = (gtk_text_iter_get_char (&prev) == '{') && (gtk_text_iter_get_char (iter) == '\n') && (gtk_text_iter_get_char (&next) == '}');
+  square = (gtk_text_iter_get_char (&prev) == '[') && (gtk_text_iter_get_char (iter) == '\n') && (gtk_text_iter_get_char (&next) == ']');
+
+  return curly || square;
 }
 
 static gchar *
@@ -382,6 +546,9 @@ ide_ruby_indenter_is_trigger (IdeIndenter *indenter,
     case GDK_KEY_KP_Enter:
     case GDK_KEY_Return:
     case GDK_KEY_d:
+    case GDK_KEY_e:
+    case GDK_KEY_f:
+    case GDK_KEY_n:
       return TRUE;
 
     default:
@@ -433,6 +600,10 @@ ide_ruby_indenter_format (IdeIndenter *indenter,
       return ret;
     case GDK_KEY_d:
       return adjust_keyword_add (rindenter, view, begin, end);
+    case GDK_KEY_e:
+    case GDK_KEY_f:
+    case GDK_KEY_n:
+      return adjust_statement_keywords (rindenter, view, begin, end);
     default:
       break;
     }
