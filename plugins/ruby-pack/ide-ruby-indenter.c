@@ -312,25 +312,6 @@ failure:
   IDE_RETURN (NULL);
 }
 
-static gboolean
-has_keyword (const GtkTextIter *iter,
-             const GtkTextIter *limit,
-             const gchar       *keyword)
-{
-  GtkTextIter copy = *iter;
-  gint n_line = gtk_text_iter_get_line (limit);
-
-  while (n_line > gtk_text_iter_get_line (&copy))
-    {
-      if (line_starts_with (&copy, keyword))
-        return TRUE;
-
-      if (!gtk_text_iter_forward_line (&copy))
-        return FALSE;
-    }
-  return FALSE;
-}
-
 static guint
 count_indent (const GtkTextIter *iter)
 {
@@ -367,7 +348,11 @@ adjust_statement_keywords (IdeRubyIndenter *rindenter,
 
   s = gtk_text_iter_get_slice (&copy, begin);
 
-  matches = g_str_equal (s, "rescue") || g_str_equal (s, "ensure") || g_str_equal (s, "when") || g_str_equal (s, "elsif") || g_str_equal (s, "else");
+  matches = g_str_equal (s, "rescue") ||
+            g_str_equal (s, "ensure") ||
+            g_str_equal (s, "when")   ||
+            g_str_equal (s, "elsif")  ||
+            g_str_equal (s, "else");
 
     if (matches)
     {
@@ -395,72 +380,22 @@ adjust_statement_keywords (IdeRubyIndenter *rindenter,
           if (gtk_source_view_get_visual_column (sv, &copy) > line_offset)
             continue;
 
-          if (g_str_equal (s, "rescue") || g_str_equal (s, "ensure"))
+          if (line_starts_with (&copy, "if") ||
+              line_starts_with (&copy, "case") ||
+              line_starts_with (&copy, "begin") ||
+              line_starts_with (&copy, "unless") ||
+              line_starts_with (&copy, "def"))
             {
-              if (line_starts_with (&copy, "begin"))
+              if (count_indent (&copy) == count_indent (begin))
                 {
-                  if (count_indent (&copy) == count_indent (begin))
-                    {
-                      continue;
-                    }
-                  else
-                    {
-                      move_first_nonspace_char (&copy);
-                      line_offset = gtk_source_view_get_visual_column (sv, &copy);
-                      move_to_visual_column (sv, begin, line_offset);
-                      IDE_RETURN (s);
-                    }
+                  continue;
                 }
-            }
-          else if (g_str_equal (s, "when"))
-            {
-              if (line_starts_with (&copy, "case"))
+              else
                 {
-                  if (count_indent (&copy) == count_indent (begin))
-                    {
-                      continue;
-                    }
-                  else
-                    {
-                      move_first_nonspace_char (&copy);
-                      line_offset = gtk_source_view_get_visual_column (sv, &copy);
-                      move_to_visual_column (sv, begin, line_offset);
-                      IDE_RETURN (s);
-                    }
-                }
-            }
-          else if (g_str_equal (s, "elsif"))
-            {
-              if (line_starts_with (&copy, "if"))
-                {
-                  if (count_indent (&copy) == count_indent (begin))
-                    {
-                      continue;
-                    }
-                  else
-                    {
-                      move_first_nonspace_char (&copy);
-                      line_offset = gtk_source_view_get_visual_column (sv, &copy);
-                      move_to_visual_column (sv, begin, line_offset);
-                      IDE_RETURN (s);
-                    }
-                }
-            }
-          else if (g_str_equal (s, "else"))
-            {
-              if (line_starts_with (&copy, "if") || line_starts_with (&copy, "unless") || line_starts_with (&copy, "case"))
-                {
-                  if (count_indent (&copy) == count_indent (begin))
-                    {
-                      continue;
-                    }
-                  else
-                    {
-                      move_first_nonspace_char (&copy);
-                      line_offset = gtk_source_view_get_visual_column (sv, &copy);
-                      move_to_visual_column (sv, begin, line_offset);
-                      IDE_RETURN (s);
-                    }
+                  move_first_nonspace_char (&copy);
+                  line_offset = gtk_source_view_get_visual_column (sv, &copy);
+                  move_to_visual_column (sv, begin, line_offset);
+                  IDE_RETURN (s);
                 }
             }
         }
