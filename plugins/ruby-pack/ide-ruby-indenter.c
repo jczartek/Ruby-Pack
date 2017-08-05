@@ -386,7 +386,7 @@ adjust_statement_keywords (IdeRubyIndenter *rindenter,
               line_starts_with (&copy, "unless") ||
               line_starts_with (&copy, "def"))
             {
-              if (count_indent (&copy) == count_indent (begin))
+              if (count_indent (&copy) > count_indent (begin))
                 {
                   continue;
                 }
